@@ -1,0 +1,77 @@
+/* Tokens de diseño de CCS Bank. Cambiar la paleta = editar solo este archivo. */
+:root {
+  /* Marca (el login usa estos colores sobre su fondo azul) */
+  --color-primario: #c9a877;
+  --color-primario-hover: #d8bb8c;
+  --color-texto-boton: #1b2644;
+  --color-acento: #c9a877;
+  --color-crema: #f6f1e6;
+  --color-azul-1: #2f3f70;
+  --color-azul-2: #1b2644;
+  --color-azul-3: #0d1324;
+
+  /* Aplicación (interfaz clara) */
+  --color-fondo: #f8f9fb;
+  --color-superficie: #ffffff;
+  --color-borde: #e7e9ee;
+  --color-borde-fuerte: #d3d7df;
+  --color-texto: #1f2937;
+  --color-texto-suave: #667085;
+  --color-texto-inverso: #ffffff;
+  --color-error: #ffb4b4;
+
+  /* Botón principal de la aplicación */
+  --btn-fondo: #1b2644;
+  --btn-fondo-hover: #2f3f70;
+  --btn-texto: #ffffff;
+
+  /* Estados */
+  --ok-fondo: #ecfdf3;
+  --ok-borde: #abefc6;
+  --ok-texto: #067647;
+  --peligro-fondo: #fef3f2;
+  --peligro-borde: #fecdca;
+  --peligro-texto: #b42318;
+  --aviso-fondo: #fffaeb;
+  --aviso-borde: #fedf89;
+  --aviso-texto: #93370d;
+  --info-fondo: #eff8ff;
+  --info-borde: #b2ddff;
+  --info-texto: #175cd3;
+
+  /* Cristal (tarjeta del login) */
+  --cristal-fondo: rgba(255, 255, 255, 0.14);
+  --cristal-borde: rgba(255, 255, 255, 0.35);
+
+  /* Tipografía */
+  --fuente-titulo: 'Roboto Slab', Georgia, serif;
+  --fuente-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Forma */
+  --radio-sm: 8px;
+  --radio-md: 12px;
+  --radio-lg: 28px;
+  --sombra-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --sombra-md: 0 8px 24px rgba(16, 24, 40, 0.1);
+  --sombra-modal: 0 24px 60px rgba(16, 24, 40, 0.28);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--fuente-ui);
+  color: var(--color-texto);
+  background: var(--color-fondo);
+  -webkit-font-smoothing: antialiased;
+}

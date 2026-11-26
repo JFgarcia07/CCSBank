@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCS Bank · Asistencia y cobro NFC</title>
+<style>
+  :root { --navy:#1b2644; --gold:#c9a877; --bg:#f7f5f0; --ok:#1d7a46; --err:#b3261e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--navy); padding:16px; max-width:480px; margin-inline:auto; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  .fecha { font-size:1.6rem; font-weight:700; text-transform:capitalize; margin:0 0 16px; }
+  .modos { display:flex; gap:8px; margin-bottom:12px; }
+  .modos button { flex:1; background:#fff; color:var(--navy); border:2px solid var(--gold); }
+  .modos button.activo { background:var(--navy); color:#fff; border-color:var(--navy); }
+  button { width:100%; padding:14px; font-size:1.05rem; border:0; border-radius:12px; background:var(--navy); color:#fff; }
+  button:disabled { opacity:.5; }
+  .cobro { display:none; background:#fff; border-radius:12px; padding:12px; margin-bottom:12px; }
+  .cobro.visible { display:block; }
+  .cobro label { display:block; font-size:.85rem; margin-bottom:4px; }
+  .cobro input { width:100%; padding:12px; font-size:1.2rem; border:2px solid var(--gold); border-radius:8px; margin-bottom:8px; }
+  #estado { margin:16px 0; padding:14px; border-radius:12px; background:#fff; border:2px solid var(--gold); min-height:56px; }
+  #estado.ok { border-color:var(--ok); color:var(--ok); }
+  #estado.err { border-color:var(--err); color:var(--err); }
+  ul { list-style:none; padding:0; margin:0; }
+  li { background:#fff; border-radius:10px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; gap:8px; }
+  li small { display:block; opacity:.7; }
+  h2 { font-size:1rem; margin:24px 0 8px; }
+  .reset { background:transparent; color:var(--err); border:1px solid var(--err); margin-top:24px; font-size:.9rem; }
+</style>
+</head>
+<body>
+  <h1>CCS Bank · Prueba NFC</h1>
+  <p class="fecha" id="fecha"></p>
+
+  <div class="modos">
+    <button id="mAsis">Asistencia</button>
+    <button id="mCobro">Cobro</button>
+  </div>
+
+  <div class="cobro" id="panelCobro">
+    <label for="monto">Monto a cobrar (CCS$)</label>
+    <input id="monto" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00">
+    <label for="concepto">Concepto (opcional)</label>
+    <input id="concepto" type="text" placeholder="Ej. Dulce de la tienda">
+  </div>
+
+  <button id="btn">Iniciar lectura de tarjeta</button>
+  <div id="estado">Elige un modo, presiona el botón y acerca la tarjeta. Si la tarjeta guarda una URL, solo pásala por el teléfono.</div>
+
+  <h2>Asistencias de hoy</h2>
+  <ul id="lista"></ul>
+
+  <h2>Movimientos de hoy</h2>
+  <ul id="movs"></ul>
+
+  <button class="reset" id="reset">Borrar datos de prueba</button>
+
+<script>
+  const SALDO_INICIAL = 10000; // centavos => CCS$ 100.00 (valor de prueba, simulado)
+  const hoy = new Date();
+  const dia = hoy.toISOString().slice(0, 10);
+  const K_ASIS = 'asistencia-' + dia;
+  const K_MOVS = 'movs-' + dia;
+  const K_SALDOS = 'saldos';
+  const K_CFG = 'cfg';
+
+  const $ = id => document.getElementById(id);
+  const leer = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } };
+  const guardar = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+  const q = c => 'CCS$ ' + (c / 100).toFixed(2);
+
+  $('fecha').textContent = hoy.toLocaleDateString('es-GT', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  // --- configuración persistente (modo, monto, concepto) ---
+  let cfg = leer(K_CFG, { modo:'asistencia', monto:'', concepto:'' });
+  function aplicarCfg() {
+    $('mAsis').classList.toggle('activo', cfg.modo === 'asistencia');
+    $('mCobro').classList.toggle('activo', cfg.modo === 'cobro');
+    $('panelCobro').classList.toggle('visible', cfg.modo === 'cobro');
+    $('monto').value = cfg.monto;
+    $('concepto').value = cfg.concepto;
+  }
+  $('mAsis').onclick = () => { cfg.modo = 'asistencia'; guardar(K_CFG, cfg); aplicarCfg(); };
+  $('mCobro').onclick = () => { cfg.modo = 'cobro'; guardar(K_CFG, cfg); aplicarCfg(); };
+  $('monto').oninput = e => { cfg.monto = e.target.value; guardar(K_CFG, cfg); };
+  $('concepto').oninput = e => { cfg.concepto = e.target.value; guardar(K_CFG, cfg); };
+
+  // --- saldos simulados ---
+  const saldoDe = id => (leer(K_SALDOS, {})[id] ?? SALDO_INICIAL);
+  function setSaldo(id, c) { const s = leer(K_SALDOS, {}); s[id] = c; guardar(K_SALDOS, s); }
+
+  function mostrar(msg, tipo) { $('estado').textContent = msg; $('estado').className = tipo || ''; }
+
+  function pintar() {
+    $('lista').innerHTML = '';
+    leer(K_ASIS, []).forEach(a => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${a.uid}</span><span>${a.hora}</span>`;
+      $('lista').appendChild(li);
+    });
+    $('movs').innerHTML = '';
+    leer(K_MOVS, []).slice().reverse().forEach(m => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${m.uid}<small>${m.concepto || 'Cobro'} · ${m.hora}</small></span><span>-${q(m.monto)}<small>Saldo ${q(m.saldo)}</small></span>`;
+      $('movs').appendChild(li);
+    });
+  }
+
+  function marcarAsistencia(uid) {
+    const datos = leer(K_ASIS, []);
+    if (datos.some(a => a.uid === uid)) {
+      mostrar('Esta tarjeta ya marcó asistencia hoy (' + uid + ')', 'err');
+      return;
+    }
+    datos.push({ uid, hora: new Date().toLocaleTimeString('es-GT') });
+    guardar(K_ASIS, datos);
+    mostrar('Asistencia marcada: ' + uid + ' · Saldo ' + q(saldoDe(uid)), 'ok');
+    pintar();
+  }
+
+  function cobrar(uid) {
+    const monto = Math.round(parseFloat(cfg.monto) * 100);
+    if (!monto || monto <= 0) { mostrar('Escribe un monto válido antes de pasar la tarjeta.', 'err'); return; }
+    const saldo = saldoDe(uid);
+    if (saldo < monto) {
+      mostrar(`Saldo insuficiente (${uid}): tiene ${q(saldo)} y se cobran ${q(monto)}.`, 'err');
+      return;
+    }
+    const nuevo = saldo - monto;
+    setSaldo(uid, nuevo);
+    const movs = leer(K_MOVS, []);
+    movs.push({ uid, monto, saldo: nuevo, concepto: cfg.concepto, hora: new Date().toLocaleTimeString('es-GT') });
+    guardar(K_MOVS, movs);
+    mostrar(`Cobro de ${q(monto)} a ${uid}. Saldo restante: ${q(nuevo)}`, 'ok');
+    pintar();
+  }
+
+  // Evita cobrar doble si la tarjeta se mantiene sobre el teléfono
+  let ultimo = { uid:null, t:0 };
+  function procesar(uid) {
+    const ahora = Date.now();
+    if (uid === ultimo.uid && ahora - ultimo.t < 4000) return;
+    ultimo = { uid, t: ahora };
+    cfg.modo === 'cobro' ? cobrar(uid) : marcarAsistencia(uid);
+  }
+
+  // --- lectura NFC (Chrome Android) ---
+  $('btn').addEventListener('click', async () => {
+    if (!('NDEFReader' in window)) {
+      mostrar('Este navegador no soporta Web NFC. Pasa la tarjeta (con URL) por el teléfono para abrir la página.', 'err');
+      return;
+    }
+    try {
+      const lector = new NDEFReader();
+      await lector.scan();
+      $('btn').disabled = true;
+      $('btn').textContent = 'Leyendo… acerca la tarjeta';
+      mostrar('Esperando tarjeta…');
+      lector.onreadingerror = () => mostrar('No se pudo leer la tarjeta, intenta de nuevo.', 'err');
+      lector.onreading = e => procesar(e.serialNumber || '(sin UID)');
+    } catch (err) {
+      mostrar('Error: ' + err.message, 'err');
+    }
+  });
+
+  $('reset').onclick = () => {
+    if (!confirm('¿Borrar asistencias, movimientos y saldos de prueba?')) return;
+    [K_ASIS, K_MOVS, K_SALDOS].forEach(k => localStorage.removeItem(k));
+    mostrar('Datos de prueba borrados.');
+    pintar();
+  };
+
+  aplicarCfg();
+  pintar();
+
+  // Modo universal: la tarjeta guarda ?id=XXXX; al pasarla, el teléfono abre la página
+  // y se ejecuta el modo activo (asistencia o cobro con el monto guardado).
+  const idUrl = new URLSearchParams(location.search).get('id');
+  if (idUrl) {
+    procesar(idUrl);
+    history.replaceState(null, '', location.pathname);
+  }
+</script>
+</body>
+</html>

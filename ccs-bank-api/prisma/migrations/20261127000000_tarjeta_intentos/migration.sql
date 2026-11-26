@@ -1,0 +1,1 @@
+ALTER TABLE "Tarjeta" ADD COLUMN "intentosFallidos" INTEGER NOT NULL DEFAULT 0;

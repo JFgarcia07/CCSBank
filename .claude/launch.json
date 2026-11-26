@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ccs-bank-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "ccs-bank-web", "run", "dev", "--", "--port", "5173", "--strictPort"],
+      "port": 5173
+    }
+  ]
+}

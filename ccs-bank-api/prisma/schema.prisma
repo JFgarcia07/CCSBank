@@ -1,0 +1,301 @@
+// Esquema de datos de CCS Bank.
+// Reglas clave: montos con Decimal(12,2); el saldo nunca se edita a mano
+// (todo movimiento crea una Transaccion y actualiza Cuenta.saldo en prisma.$transaction()).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────── Enums ─────────────
+
+enum Rol {
+  ALUMNO
+  MAESTRO
+  ADMIN
+}
+
+enum TipoMovimiento {
+  SALARIO
+  BONUS
+  FINE
+  COMPRA
+  TRANSFERENCIA
+  PRESTAMO
+}
+
+enum EstadoCobro {
+  PENDIENTE
+  COBRADO
+}
+
+enum EstadoReporte {
+  PENDIENTE
+  APROBADO
+  RECHAZADO
+}
+
+enum EstadoPrestamo {
+  SOLICITADO
+  APROBADO
+  RECHAZADO
+  PAGADO
+}
+
+enum EstadoTarjeta {
+  SOLICITADA
+  ACTIVA
+  BLOQUEADA
+}
+
+// ───────────── Usuarios y grados ─────────────
+
+model Grado {
+  id       String    @id @default(uuid())
+  nombre   String    @unique
+  usuarios Usuario[]
+  // Maestros asignados a este grado (un maestro puede tener varios grados)
+  maestros MaestroGrado[]
+  trabajos Trabajo[]
+  conceptos ConceptoNomina[]
+  productos Producto[]
+  creadoEn DateTime  @default(now())
+}
+
+model Usuario {
+  id        String   @id @default(uuid())
+  carne     String   @unique // carné o nombre de usuario para iniciar sesión
+  email     String?  @unique
+  password  String // hash bcrypt
+  nombre    String
+  apellidos String
+  rol       Rol      @default(ALUMNO)
+  activo    Boolean  @default(true)
+  fotoUrl   String? // ruta en Storage (avatares/)
+  cvUrl     String? // ruta en Storage (cvs/)
+  gradoId   String?
+  grado     Grado?   @relation(fields: [gradoId], references: [id])
+  creadoEn  DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  cuenta          Cuenta?
+  tarjeta         Tarjeta?
+  asignaciones    Asignacion[]
+  reportes        ReporteSemanal[] @relation("ReporteAlumno")
+  reportesRevisados ReporteSemanal[] @relation("ReporteRevisor")
+  prestamos       Prestamo[]       @relation("PrestamoAlumno")
+  prestamosAutorizados Prestamo[]  @relation("PrestamoAutorizador")
+  compras         Compra[]
+  gradosAsignados MaestroGrado[]
+  auditorias      Auditoria[]
+  transaccionesCreadas Transaccion[] @relation("TransaccionCreadaPor")
+
+  @@index([gradoId])
+  @@index([rol])
+}
+
+// Relación muchos-a-muchos: maestros ↔ grados
+model MaestroGrado {
+  maestroId String
+  gradoId   String
+  maestro   Usuario @relation(fields: [maestroId], references: [id], onDelete: Cascade)
+  grado     Grado   @relation(fields: [gradoId], references: [id], onDelete: Cascade)
+
+  @@id([maestroId, gradoId])
+}
+
+// ───────────── Núcleo bancario ─────────────
+
+model Cuenta {
+  id        String   @id @default(uuid())
+  usuarioId String   @unique
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+  saldo     Decimal  @default(0) @db.Decimal(12, 2)
+  creadoEn  DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  transacciones   Transaccion[]
+  cobrosPendientes CobroPendiente[]
+}
+
+model Transaccion {
+  id         String         @id @default(uuid())
+  cuentaId   String
+  cuenta     Cuenta         @relation(fields: [cuentaId], references: [id])
+  tipo       TipoMovimiento
+  monto      Decimal        @db.Decimal(12, 2) // positivo = ingreso, negativo = egreso
+  concepto   String
+  creadoPorId String?
+  creadoPor  Usuario?       @relation("TransaccionCreadaPor", fields: [creadoPorId], references: [id])
+  fecha      DateTime       @default(now())
+
+  @@index([cuentaId, fecha])
+}
+
+model CobroPendiente {
+  id        String         @id @default(uuid())
+  cuentaId  String
+  cuenta    Cuenta         @relation(fields: [cuentaId], references: [id])
+  tipo      TipoMovimiento // SALARIO o BONUS
+  monto     Decimal        @db.Decimal(12, 2)
+  concepto  String
+  estado    EstadoCobro    @default(PENDIENTE)
+  creadoEn  DateTime       @default(now())
+  cobradoEn DateTime?
+
+  @@index([cuentaId, estado])
+}
+
+// Catálogo de bonus y fines de cada clase: el maestro los crea una vez y luego los emite
+// con un clic (el motivo y el monto salen del concepto).
+model ConceptoNomina {
+  id       String         @id @default(uuid())
+  gradoId  String
+  grado    Grado          @relation(fields: [gradoId], references: [id], onDelete: Cascade)
+  tipo     TipoMovimiento // BONUS o FINE
+  nombre   String // se usa como motivo del movimiento
+  monto    Decimal        @db.Decimal(12, 2)
+  creadoEn DateTime       @default(now())
+
+  @@unique([gradoId, tipo, nombre])
+  @@index([gradoId])
+}
+
+// ───────────── Trabajos y reportes ─────────────
+
+model Trabajo {
+  id             String       @id @default(uuid())
+  gradoId        String
+  grado          Grado        @relation(fields: [gradoId], references: [id])
+  nombre         String
+  descripcion    String? // responsabilidades del trabajo
+  salarioSemanal Decimal      @db.Decimal(12, 2)
+  activo         Boolean      @default(true)
+  asignaciones   Asignacion[]
+
+  @@unique([gradoId, nombre])
+}
+
+model Asignacion {
+  id         String    @id @default(uuid())
+  usuarioId  String
+  usuario    Usuario   @relation(fields: [usuarioId], references: [id])
+  trabajoId  String
+  trabajo    Trabajo   @relation(fields: [trabajoId], references: [id])
+  desde      DateTime  @default(now())
+  hasta      DateTime?
+
+  reportes ReporteSemanal[]
+
+  @@index([usuarioId])
+  @@index([trabajoId])
+}
+
+model ReporteSemanal {
+  id            String        @id @default(uuid())
+  asignacionId  String
+  asignacion    Asignacion    @relation(fields: [asignacionId], references: [id])
+  alumnoId      String
+  alumno        Usuario       @relation("ReporteAlumno", fields: [alumnoId], references: [id])
+  semana        DateTime      @db.Date // lunes de la semana reportada
+  archivoPath   String // ruta del PDF en Storage (reportes/)
+  estado        EstadoReporte @default(PENDIENTE)
+  comentario    String?
+  revisadoPorId String?
+  revisadoPor   Usuario?      @relation("ReporteRevisor", fields: [revisadoPorId], references: [id])
+  creadoEn      DateTime      @default(now())
+  revisadoEn    DateTime?
+  pagadoEn      DateTime? // cuándo se pagó el salario de esta semana
+
+  @@unique([asignacionId, semana])
+  @@index([alumnoId])
+  @@index([estado])
+}
+
+// ───────────── Préstamos ─────────────
+
+model Prestamo {
+  id            String         @id @default(uuid())
+  alumnoId      String
+  alumno        Usuario        @relation("PrestamoAlumno", fields: [alumnoId], references: [id])
+  monto         Decimal        @db.Decimal(12, 2)
+  motivo        String?
+  estado        EstadoPrestamo @default(SOLICITADO)
+  autorizadoPorId String?
+  autorizadoPor Usuario?       @relation("PrestamoAutorizador", fields: [autorizadoPorId], references: [id])
+  creadoEn      DateTime       @default(now())
+  resueltoEn    DateTime?
+
+  @@index([alumnoId])
+}
+
+// ───────────── Tienda y tarjetas ─────────────
+
+model Producto {
+  id          String       @id @default(uuid())
+  gradoId     String
+  grado       Grado        @relation(fields: [gradoId], references: [id])
+  nombre      String
+  descripcion String?
+  precio      Decimal      @db.Decimal(12, 2)
+  stock       Int          @default(0)
+  activo      Boolean      @default(true)
+  items       CompraItem[]
+
+  @@unique([gradoId, nombre])
+  @@index([gradoId])
+}
+
+model Compra {
+  id        String       @id @default(uuid())
+  alumnoId  String
+  alumno    Usuario      @relation(fields: [alumnoId], references: [id])
+  total     Decimal      @db.Decimal(12, 2)
+  metodo    String // "TRANSFERENCIA" o "TARJETA"
+  fecha     DateTime     @default(now())
+  entregadaEn DateTime? // cuándo se entregó el premio al alumno
+  items     CompraItem[]
+
+  @@index([alumnoId])
+}
+
+model CompraItem {
+  id             String   @id @default(uuid())
+  compraId       String
+  compra         Compra   @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  productoId     String
+  producto       Producto @relation(fields: [productoId], references: [id])
+  cantidad       Int
+  precioUnitario Decimal  @db.Decimal(12, 2)
+}
+
+model Tarjeta {
+  id        String        @id @default(uuid())
+  usuarioId String        @unique
+  usuario   Usuario       @relation(fields: [usuarioId], references: [id])
+  uidNfc    String?       @unique
+  pinHash   String?
+  estado    EstadoTarjeta @default(SOLICITADA)
+  intentosFallidos Int @default(0) // PIN incorrecto seguidos; a los 5 se bloquea
+  creadoEn  DateTime      @default(now())
+}
+
+// ───────────── Auditoría ─────────────
+
+model Auditoria {
+  id         String   @id @default(uuid())
+  usuarioId  String?
+  usuario    Usuario? @relation(fields: [usuarioId], references: [id])
+  accion     String // p. ej. "PAGO_SALARIO", "APROBAR_REPORTE"
+  entidad    String? // p. ej. "ReporteSemanal"
+  entidadId  String?
+  detalle    Json?
+  fecha      DateTime @default(now())
+
+  @@index([usuarioId])
+  @@index([fecha])
+}

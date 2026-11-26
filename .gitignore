@@ -1,0 +1,29 @@
+# Variables de entorno (secretos): nunca al repositorio
+.env
+.env.*
+!.env.example
+
+# Dependencias y compilados
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+coverage/
+
+# Cliente de Prisma generado (se crea con `npx prisma generate`)
+ccs-bank-api/src/generated/
+
+# Logs y sistema
+*.log
+.DS_Store
+Thumbs.db
+
+# Editores
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Archivos locales de Claude
+.claude/settings.local.json
+.claude/skills/
+skills-lock.json
